@@ -1,13 +1,13 @@
 import { createClient } from '@supabase/supabase-js'
 
-const supabaseUrl = 'https://hsckgramsgokjtvcymhv.supabase.co'
-const supabaseAnonKey = 'sb_publishable_a9BOUjYmfa2XId79ma_x9Q_xRksM9TZ'
+const supabaseUrl = 'https://clqqnipibcnouwinzbuc.supabase.co'
+const supabaseAnonKey = 'sb_publishable_AZJtat5-kvLSIPt9o_ChKA_veXLms5D'
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: { persistSession: true, autoRefreshToken: true }
 })
 
-// Helper to check if tables exist
+// Check if tables exist - now they do!
 export const checkTables = async () => {
   const { error } = await supabase.from('beahead_cars').select('id').limit(1)
   if (error && error.code === 'PGRST205') {

@@ -285,9 +285,35 @@ export default function App() {
           </section>
 
           <section className="max-w-[1120px] mx-auto px-6 py-12">
-            <div className="bg-zinc-900 rounded-[24px] p-8 md:p-10 text-white flex flex-col md:flex-row justify-between gap-8">
-              <div><div className="font-['Fraunces'] text-[22px] leading-[1.1]">We're early. Building<br/>in public from Bulawayo.</div><div className="text-[13px] leading-[1.6] text-zinc-400 mt-3 max-w-[380px]">No fake offices. No licensed badges we haven't earned. Just a real product to help Zimbabweans save for cars without needing $6,000 at once. If you're a bank or clearing agent, let's talk.</div></div>
-              <div className="flex flex-col gap-3 md:text-right"><div className="text-[12px] text-zinc-400">Contact</div><div className="text-[14px]">Built by a team in Bulawayo • Currently in pilot</div><button onClick={()=>setView('auth')} className="mt-2 bg-white text-zinc-900 px-5 py-2.5 rounded-full text-[13px] font-medium w-fit md:ml-auto">Start saving →</button></div>
+            <div className="bg-zinc-900 rounded-[28px] p-8 md:p-12 text-white relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-[400px] h-[400px] bg-white/[0.04] rounded-full blur-[80px] -translate-y-1/2 translate-x-1/2"></div>
+              <div className="relative grid md:grid-cols-[1.2fr_0.8fr] gap-10 items-center">
+                <div>
+                  <div className="inline-flex items-center gap-2 bg-white/10 border border-white/10 rounded-full px-3 py-1 text-[10px] font-medium tracking-widest mb-5">TRANSPARENT PRICING</div>
+                  <h3 className="font-['Fraunces'] text-[28px] md:text-[32px] font-[600] leading-[0.95] tracking-[-0.02em]">See the full cost<br/>before you save.</h3>
+                  <div className="mt-6 grid grid-cols-3 gap-6 max-w-[420px]">
+                    <div><div className="text-[11px] text-zinc-500 uppercase tracking-widest">Car price</div><div className="text-[13px] font-medium mt-1">From BeForward</div></div>
+                    <div><div className="text-[11px] text-zinc-500 uppercase tracking-widest">Shipping & duty</div><div className="text-[13px] font-medium mt-1">Calculated upfront</div></div>
+                    <div><div className="text-[11px] text-zinc-500 uppercase tracking-widest">Our fee</div><div className="text-[13px] font-medium mt-1">3% flat, no surprises</div></div>
+                  </div>
+                </div>
+                <div className="bg-white rounded-[20px] p-5 text-zinc-900">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="text-[11px] font-medium tracking-widest text-zinc-500">EXAMPLE BREAKDOWN</div>
+                    <div className="w-6 h-6 bg-zinc-900 rounded-full flex items-center justify-center"><span className="text-white text-[10px]">✓</span></div>
+                  </div>
+                  <div className="space-y-2.5 text-[12px]">
+                    <div className="flex justify-between"><span className="text-zinc-500">Toyota Aqua 2015</span><span className="font-medium">$3,250</span></div>
+                    <div className="flex justify-between"><span className="text-zinc-500">Freight to Durban</span><span className="font-medium">$1,150</span></div>
+                    <div className="flex justify-between"><span className="text-zinc-500">ZIMRA duty est.</span><span className="font-medium">$1,787</span></div>
+                    <div className="flex justify-between"><span className="text-zinc-500">Clearing & delivery</span><span className="font-medium">$350</span></div>
+                    <div className="h-px bg-zinc-100 my-2"></div>
+                    <div className="flex justify-between font-semibold"><span>Total</span><span>$6,634</span></div>
+                    <div className="text-[10px] text-zinc-500 mt-1">Pay $553/mo for 12 months • No interest</div>
+                  </div>
+                  <button onClick={()=>setView('auth')} className="mt-4 w-full bg-zinc-900 text-white py-2.5 rounded-full text-[12px] font-medium hover:bg-black transition">Start saving for this amount →</button>
+                </div>
+              </div>
             </div>
           </section>
         </div>

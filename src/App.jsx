@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from './lib/supabase'
 import { calculateLandedCost, calculateMonthly, formatUSD } from './utils/calculations'
-import { ArrowRight, Shield, Wallet, Car, Clock, Plus, LogOut, X, Check, Calculator, Map, FileCheck, Bell, Users, Zap, Target, TrendingDown, AlertCircle } from 'lucide-react'
+import { ArrowRight, Shield, Wallet, Car, Clock, Plus, LogOut, X, Check, Calculator, Map, FileCheck, Bell, Users, Zap, Target, TrendingDown, AlertCircle, Package, Ship } from 'lucide-react'
 
 export default function App() {
   const [user, setUser] = useState(null)
@@ -12,14 +12,18 @@ export default function App() {
   const [selectedCar, setSelectedCar] = useState(null)
   const [showNewCar, setShowNewCar] = useState(false)
   const [showAgreement, setShowAgreement] = useState(false)
+  const [showTerms, setShowTerms] = useState(false)
+  const [showFreight, setShowFreight] = useState(false)
   const [loading, setLoading] = useState(true)
   const [authForm, setAuthForm] = useState({ email: '', password: '', fullName: '', phone: '' })
   const [newCarForm, setNewCarForm] = useState({ make: '', model: '', year: '', price: '', url: '', mileage: '', engine: '' })
-  
-  // Attractive features state
   const [dutyCalc, setDutyCalc] = useState({ price: '3250', engine: '1500', year: '2015' })
   const [checklist, setChecklist] = useState({ invoice: false, id: false, proof: false, zimra: false, license: false })
-  const [priceAlerts, setPriceAlerts] = useState({})
+  const [freightGroups, setFreightGroups] = useState([
+    { id: '1', make: 'Toyota', model: 'Aqua', members: 2, freightTotal: 1150, route: 'Japan → Durban → Bulawayo', leaving: '15 Oct 2026', spaces: 1 },
+    { id: '2', make: 'Honda', model: 'Fit', members: 1, freightTotal: 1150, route: 'Japan → Dar es Salaam → Bulawayo', leaving: '22 Oct 2026', spaces: 2 },
+  ])
+  const [joinedGroups, setJoinedGroups] = useState([])
 
   useEffect(() => {
     init()
@@ -152,7 +156,24 @@ export default function App() {
     setSelectedCar(null)
   }
 
-  // Duty calculator logic
+  const handleJoinGroup = (group) => {
+    if (joinedGroups.includes(group.id)) {
+      alert('You already joined this container group. We will notify you when it is full.')
+      return
+    }
+    // Check if user has a goal for this make/model
+    const hasGoal = goals.some(g => g.beahead_cars?.make === group.make && g.beahead_cars?.model === group.model && g.status === 'active')
+    if (!hasGoal && goals.length === 0) {
+      alert(`To join the ${group.make} ${group.model} container, first add a ${group.make} ${group.model} to your savings plans. Then you can split freight $${group.freightTotal} with others.`)
+      setShowNewCar(true)
+      return
+    }
+    
+    setJoinedGroups([...joinedGroups, group.id])
+    setFreightGroups(freightGroups.map(g => g.id === group.id ? { ...g, members: g.members + 1, spaces: Math.max(0, g.spaces - 1) } : g))
+    setShowFreight(true)
+  }
+
   const dutyResult = (() => {
     const price = parseFloat(dutyCalc.price) || 0
     const engine = parseInt(dutyCalc.engine) || 1500
@@ -233,11 +254,6 @@ export default function App() {
                   </div>
                   <div className="h-2 bg-white/10 rounded-full overflow-hidden"><div className="h-full bg-white w-[42%] rounded-full"></div></div>
                   <div className="mt-3 flex justify-between text-[10px] text-zinc-400"><span>$2,850 saved</span><span>$6,687 goal</span></div>
-                  <div className="mt-5 grid grid-cols-3 gap-3 text-[11px]">
-                    <div className="bg-white/10 rounded-[10px] p-2.5"><div className="text-zinc-400 text-[9px]">Car</div><div className="font-medium mt-0.5">Aqua 2015</div></div>
-                    <div className="bg-white/10 rounded-[10px] p-2.5"><div className="text-zinc-400 text-[9px]">Monthly</div><div className="font-medium mt-0.5">$557/mo</div></div>
-                    <div className="bg-white/10 rounded-[10px] p-2.5"><div className="text-zinc-400 text-[9px]">Left</div><div className="font-medium mt-0.5">$3,837</div></div>
-                  </div>
                 </div>
                 <div className="p-3.5 flex items-center gap-2 text-[11px] text-zinc-600"><div className="w-6 h-6 bg-zinc-100 rounded-full flex items-center justify-center"><Car size={12}/></div> Toyota Aqua 2015 • Your savings plan</div>
               </div>
@@ -301,7 +317,7 @@ export default function App() {
           <div className="flex items-center justify-between mb-6">
             <div>
               <h2 className="font-['Fraunces'] text-[22px] font-[600] tracking-[-0.02em]">Your savings</h2>
-              <p className="text-[11px] text-zinc-500 mt-1">{profile?.bank_account_number} • Your savings reference — deposit to your own bank account</p>
+              <p className="text-[11px] text-zinc-500 mt-1">{profile?.bank_account_number} • Your savings reference</p>
             </div>
             <button onClick={()=>setShowNewCar(true)} className="bg-zinc-900 text-white px-4 py-2.5 rounded-full text-[11px] font-medium flex items-center gap-1.5"><Plus size={13}/> Add car</button>
           </div>
@@ -323,33 +339,12 @@ export default function App() {
                       <div key={goal.id} className="bg-white border border-zinc-200 rounded-[16px] p-5">
                         <div className="flex justify-between"><div><div className="font-medium text-[12px]">{goal.beahead_cars?.make} {goal.beahead_cars?.model} {goal.beahead_cars?.year}</div><div className="text-[10px] text-zinc-500">{formatUSD(goal.goal_amount_usd)} total • Ref: {goal.escrow_account_number}</div></div><span className="text-[10px] px-2 py-1 rounded-full bg-zinc-900 text-white">{goal.status}</span></div>
                         <div className="mt-3"><div className="flex justify-between text-[10px] mb-1"><span className="text-zinc-500">{formatUSD(goal.saved_amount_usd||0)} saved in your bank</span><span className="font-medium">{Math.round(goal.progress_percent||0)}%</span></div><div className="h-1.5 bg-zinc-100 rounded-full overflow-hidden"><div className="h-full bg-zinc-900 rounded-full" style={{width:`${Math.min(100, goal.progress_percent||0)}%`}}></div></div></div>
-                        <div className="mt-3 bg-zinc-50 rounded-[10px] p-2.5 flex items-center gap-2 text-[10px] text-zinc-600"><Shield size={11}/> Money held in your bank account, not by BeAhead. We track it, bank holds it.</div>
                       </div>
                     ))}
                   </div>
                 )}
               </div>
 
-              <div className="bg-white border border-zinc-200 rounded-[16px] p-5">
-                <div className="font-medium text-[13px] flex items-center gap-1.5"><Map size={14}/> Import timeline tracker</div>
-                <div className="mt-4 relative">
-                  <div className="absolute left-[11px] top-2 bottom-2 w-px bg-zinc-200"></div>
-                  {[
-                    { title: 'Japan - Purchase', desc: 'Car bought in Japan, documents prepared', time: 'Day 1-3', done: (goals[0]?.progress_percent||0) >= 100 },
-                    { title: 'Shipping to Durban', desc: 'Container ship Japan → Durban, South Africa', time: '3-5 weeks', done: false },
-                    { title: 'Clearing at Beitbridge', desc: 'ZIMRA duty, inspection, import docs', time: '2-4 days', done: false },
-                    { title: 'Delivery to Bulawayo', desc: 'Driver brings car to your door, final checks', time: '1-2 days', done: false },
-                  ].map((step,i)=>(
-                    <div key={i} className="relative flex gap-3 pb-5 last:pb-0">
-                      <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${step.done ? 'bg-zinc-900 text-white' : 'bg-white border border-zinc-300'}`}>{step.done ? <Check size={12}/> : <span className="w-1.5 h-1.5 bg-zinc-400 rounded-full"></span>}</div>
-                      <div className="flex-1 -mt-0.5"><div className="flex justify-between"><span className="text-[12px] font-medium">{step.title}</span><span className="text-[10px] text-zinc-500">{step.time}</span></div><div className="text-[11px] text-zinc-500 mt-0.5">{step.desc}</div></div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-4">
               <div className="bg-white border border-zinc-200 rounded-[16px] p-5">
                 <div className="font-medium text-[13px] flex items-center gap-1.5"><Calculator size={14}/> Duty calculator</div>
                 <div className="text-[11px] text-zinc-500 mt-1">Real ZIMRA rates by engine CC & age</div>
@@ -364,53 +359,83 @@ export default function App() {
                     <div className="flex justify-between text-[11px] mt-1"><span className="text-zinc-400">Duty amount</span><span className="font-medium">{formatUSD(dutyResult.duty)}</span></div>
                     <div className="flex justify-between text-[12px] font-semibold mt-2 pt-2 border-t border-white/10"><span>Total landed</span><span>{formatUSD(dutyResult.total)}</span></div>
                   </div>
-                  <div className="text-[10px] text-zinc-500 flex gap-1"><AlertCircle size={10}/> Estimate only. Real ZIMRA may vary. We cover up to $200 if we miscalculate.</div>
                 </div>
               </div>
 
               <div className="bg-white border border-zinc-200 rounded-[16px] p-5">
+                <div className="font-medium text-[13px] flex items-center gap-1.5"><Map size={14}/> Import timeline</div>
+                <div className="mt-4 relative">
+                  <div className="absolute left-[11px] top-2 bottom-2 w-px bg-zinc-200"></div>
+                  {[
+                    { title: 'Japan - Purchase', desc: 'Car bought, documents prepared', time: 'Day 1-3', done: (goals[0]?.progress_percent||0) >= 100 },
+                    { title: 'Shipping to Durban', desc: 'Container ship Japan → Durban', time: '3-5 weeks', done: false },
+                    { title: 'Clearing at Beitbridge', desc: 'ZIMRA duty, inspection', time: '2-4 days', done: false },
+                    { title: 'Delivery to Bulawayo', desc: 'Driver to your door', time: '1-2 days', done: false },
+                  ].map((step,i)=>(
+                    <div key={i} className="relative flex gap-3 pb-5 last:pb-0">
+                      <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${step.done ? 'bg-zinc-900 text-white' : 'bg-white border border-zinc-300'}`}>{step.done ? <Check size={12}/> : <span className="w-1.5 h-1.5 bg-zinc-400 rounded-full"></span>}</div>
+                      <div className="flex-1 -mt-0.5"><div className="flex justify-between"><span className="text-[12px] font-medium">{step.title}</span><span className="text-[10px] text-zinc-500">{step.time}</span></div><div className="text-[11px] text-zinc-500 mt-0.5">{step.desc}</div></div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div className="bg-white border border-zinc-200 rounded-[16px] p-5">
                 <div className="font-medium text-[13px] flex items-center gap-1.5"><FileCheck size={14}/> Document checklist</div>
                 <div className="text-[11px] text-zinc-500 mt-1">Don't get stuck at Beitbridge</div>
-                <div className="mt-3 space-y-2.5">
+                <div className="mt-3 space-y-2">
                   {[
-                    { key: 'invoice', label: 'BeForward proforma invoice', desc: 'From Japan with chassis number' },
+                    { key: 'invoice', label: 'Proforma invoice', desc: 'From BeForward with chassis' },
                     { key: 'id', label: 'National ID + Passport', desc: 'Certified copies' },
-                    { key: 'proof', label: 'Proof of address', desc: 'Utility bill, not older than 3 months' },
-                    { key: 'zimra', label: 'ZIMRA import forms', desc: 'Form 49 + duty payment proof' },
-                    { key: 'license', label: 'Driver license + insurance', desc: 'For collection' },
+                    { key: 'proof', label: 'Proof of address', desc: 'Utility bill <3 months' },
+                    { key: 'zimra', label: 'ZIMRA forms', desc: 'Form 49 + duty proof' },
+                    { key: 'license', label: 'License + insurance', desc: 'For collection' },
                   ].map(item=>(
                     <label key={item.key} className="flex gap-2.5 p-2.5 rounded-[10px] hover:bg-zinc-50 cursor-pointer border border-transparent hover:border-zinc-100">
                       <input type="checkbox" checked={checklist[item.key]} onChange={e=>setChecklist({...checklist, [item.key]: e.target.checked})} className="mt-0.5 rounded"/>
                       <div className="flex-1"><div className="text-[11px] font-medium flex items-center gap-1.5">{item.label} {checklist[item.key] && <Check size={10} className="text-green-600"/>}</div><div className="text-[10px] text-zinc-500">{item.desc}</div></div>
                     </label>
                   ))}
-                  <div className="mt-2 bg-zinc-50 rounded-full h-1.5 overflow-hidden"><div className="h-full bg-zinc-900 transition-all" style={{width: `${Object.values(checklist).filter(Boolean).length/5*100}%`}}></div></div>
-                  <div className="text-[10px] text-zinc-500 text-center">{Object.values(checklist).filter(Boolean).length}/5 documents ready</div>
+                  <div className="mt-2 bg-zinc-100 rounded-full h-1.5 overflow-hidden"><div className="h-full bg-zinc-900 transition-all" style={{width: `${Object.values(checklist).filter(Boolean).length/5*100}%`}}></div></div>
+                  <div className="text-[10px] text-zinc-500 text-center">{Object.values(checklist).filter(Boolean).length}/5 ready</div>
                 </div>
               </div>
 
               <div className="bg-white border border-zinc-200 rounded-[16px] p-5">
-                <div className="font-medium text-[13px] flex items-center gap-1.5"><Bell size={14}/> Price alerts & group buying</div>
-                <div className="mt-3 space-y-3">
-                  {goals.slice(0,2).map(goal=>(
-                    <div key={goal.id} className="flex items-center justify-between bg-zinc-50 rounded-[10px] p-2.5">
-                      <div><div className="text-[11px] font-medium">{goal.beahead_cars?.make} {goal.beahead_cars?.model}</div><div className="text-[10px] text-zinc-500">Alert if price drops below {formatUSD(goal.car_price_usd)}</div></div>
-                      <button onClick={()=>setPriceAlerts({...priceAlerts, [goal.id]: !priceAlerts[goal.id]})} className={`w-9 h-5 rounded-full p-0.5 transition ${priceAlerts[goal.id] ? 'bg-zinc-900' : 'bg-zinc-300'}`}><div className={`w-4 h-4 bg-white rounded-full transition ${priceAlerts[goal.id] ? 'translate-x-4' : ''}`}></div></button>
-                    </div>
-                  ))}
-                  {goals.length===0 && <div className="text-[11px] text-zinc-500 py-2">Add a car to enable price alerts. We'll watch BeForward and notify you if price drops.</div>}
-                  <div className="bg-[#f4f4f0] rounded-[10px] p-3">
-                    <div className="flex items-center gap-1.5 text-[11px] font-medium"><Users size={12}/> Group buying</div>
-                    <div className="text-[11px] text-zinc-600 mt-1">2 others saving for Toyota Aqua in Bulawayo. Join to share container and split freight $1,150 → $575 each.</div>
-                    <button className="mt-2 text-[11px] font-medium underline">Join group →</button>
-                  </div>
+                <div className="font-medium text-[13px] flex items-center gap-1.5"><Package size={14}/> Freight splitting</div>
+                <div className="text-[11px] text-zinc-500 mt-1">Share container, split $1,150 freight</div>
+                <div className="mt-4 space-y-3">
+                  {freightGroups.map(group=>{
+                    const perPerson = Math.round(group.freightTotal / (group.members + (joinedGroups.includes(group.id) ? 1 : 0) || 1))
+                    const isJoined = joinedGroups.includes(group.id)
+                    return (
+                      <div key={group.id} className="border border-zinc-200 rounded-[12px] p-3">
+                        <div className="flex justify-between items-start">
+                          <div><div className="font-medium text-[12px] flex items-center gap-1.5"><Ship size={12}/> {group.make} {group.model} Container</div><div className="text-[10px] text-zinc-500 mt-0.5">{group.route} • Leaves {group.leaving}</div></div>
+                          <span className="text-[10px] bg-zinc-100 px-2 py-1 rounded-full">{group.spaces} spaces left</span>
+                        </div>
+                        <div className="mt-3 grid grid-cols-3 gap-2 text-[11px]">
+                          <div className="bg-zinc-50 rounded-[8px] p-2"><div className="text-[9px] text-zinc-500">Members</div><div className="font-medium">{group.members + (isJoined ? 1 : 0)}/3</div></div>
+                          <div className="bg-zinc-50 rounded-[8px] p-2"><div className="text-[9px] text-zinc-500">Freight total</div><div className="font-medium">${group.freightTotal}</div></div>
+                          <div className="bg-zinc-900 text-white rounded-[8px] p-2"><div className="text-[9px] text-zinc-400">You pay</div><div className="font-medium">${perPerson}</div></div>
+                        </div>
+                        <div className="mt-2 text-[10px] text-zinc-500">Save ${group.freightTotal - perPerson} by sharing</div>
+                        <button onClick={()=>handleJoinGroup(group)} disabled={isJoined} className={`mt-3 w-full py-2 rounded-full text-[11px] font-medium transition ${isJoined ? 'bg-green-100 text-green-700' : 'bg-zinc-900 text-white hover:bg-black'}`}>
+                          {isJoined ? '✓ Joined — We\'ll notify you' : `Join group → Split to $${perPerson} each`}
+                        </button>
+                      </div>
+                    )
+                  })}
+                  <button onClick={()=>setShowFreight(true)} className="w-full text-[11px] font-medium underline py-2">How freight splitting works →</button>
                 </div>
               </div>
 
               <div className="bg-zinc-900 text-white rounded-[16px] p-4">
                 <div className="text-[11px] font-medium flex items-center gap-1.5"><Shield size={12}/> Where your money goes</div>
                 <div className="text-[11px] leading-[1.5] text-zinc-400 mt-2">
-                  We don't hold your money. You deposit directly into your own bank account using reference <span className="text-white font-mono">{profile?.bank_account_number || 'BA-XXXXXX'}</span>. We only track it. Bank holds it, bank verifies it, bank releases it to BeForward when you're ready. No middleman holding cash.
+                  We don't hold your money. You deposit directly into your own bank account using reference <span className="text-white font-mono">{profile?.bank_account_number || 'BA-XXXXXX'}</span>. We only track progress. Bank holds, verifies, releases to BeForward when ready.
                 </div>
               </div>
             </div>
@@ -433,10 +458,6 @@ export default function App() {
                   <input placeholder="Price USD" type="number" value={newCarForm.price} onChange={e=>setNewCarForm({...newCarForm, price:e.target.value})} className="bg-zinc-50 border border-zinc-200 rounded-full px-3 py-2.5 text-[11px] focus:outline-none focus:border-zinc-900" required/>
                 </div>
                 <input placeholder="BeForward link (paste here)" value={newCarForm.url} onChange={e=>setNewCarForm({...newCarForm, url:e.target.value})} className="w-full bg-zinc-50 border border-zinc-200 rounded-full px-3 py-2.5 text-[11px] focus:outline-none focus:border-zinc-900"/>
-                <div className="grid grid-cols-2 gap-2.5">
-                  <input placeholder="Mileage (optional)" type="number" value={newCarForm.mileage} onChange={e=>setNewCarForm({...newCarForm, mileage:e.target.value})} className="bg-zinc-50 border border-zinc-200 rounded-full px-3 py-2.5 text-[11px] focus:outline-none focus:border-zinc-900"/>
-                  <input placeholder="Engine CC (e.g. 1500)" type="number" value={newCarForm.engine} onChange={e=>setNewCarForm({...newCarForm, engine:e.target.value})} className="bg-zinc-50 border border-zinc-200 rounded-full px-3 py-2.5 text-[11px] focus:outline-none focus:border-zinc-900"/>
-                </div>
                 <button type="submit" className="w-full bg-zinc-900 text-white py-3 rounded-full text-[11px] font-medium mt-2">Calculate total cost →</button>
               </form>
             </div>
@@ -455,7 +476,6 @@ export default function App() {
                     {calc.breakdown.map((b,i)=><div key={i} className="flex justify-between text-[11px]"><span className="text-zinc-600">{b.label}</span><span className="font-medium">{formatUSD(b.value)}</span></div>)}
                     <div className="h-px bg-zinc-200 my-1.5"></div>
                     <div className="flex justify-between font-medium text-[12px]"><span>Total needed</span><span>{formatUSD(calc.total)}</span></div>
-                    <div className="text-[10px] text-zinc-500">{formatUSD(calculateMonthly(calc.total))}/month for 12 months • Cancel anytime</div>
                   </div>
                   <div className="flex gap-2">
                     <button onClick={()=>setShowAgreement(false)} className="flex-1 border border-zinc-200 py-2.5 rounded-full text-[11px] font-medium">Cancel</button>
@@ -468,10 +488,57 @@ export default function App() {
         </div>
       )}
 
+      {showFreight && (
+        <div className="fixed inset-0 bg-zinc-900/20 backdrop-blur-[10px] z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-[20px] max-w-[440px] w-full shadow-[0_20px_60px_-20px_rgba(0,0,0,0.3)]">
+            <div className="p-6">
+              <div className="flex justify-between items-center mb-4"><div className="font-medium flex items-center gap-2"><Package size={16}/> Freight splitting explained</div><button onClick={()=>setShowFreight(false)} className="w-7 h-7 bg-zinc-100 rounded-full flex items-center justify-center"><X size={14}/></button></div>
+              <div className="space-y-4 text-[12px] leading-[1.6] text-zinc-600">
+                <p>One container from Japan to Durban costs <b className="text-zinc-900">$1,150</b> whether it has 1 car or 3 cars.</p>
+                <div className="bg-zinc-50 rounded-[12px] p-4 grid grid-cols-3 gap-3 text-center">
+                  <div><div className="text-[11px] text-zinc-500">1 person</div><div className="font-semibold">$1,150 each</div></div>
+                  <div><div className="text-[11px] text-zinc-500">2 people</div><div className="font-semibold">$575 each</div></div>
+                  <div className="bg-zinc-900 text-white rounded-[10px] p-2"><div className="text-[10px] text-zinc-400">3 people</div><div className="font-semibold">$383 each</div></div>
+                </div>
+                <p>When you join a group, we match you with others buying the same model (e.g., Toyota Aqua) leaving Japan around the same date. You save <b className="text-zinc-900">$575-$767</b> on freight.</p>
+                <p className="text-[11px] bg-amber-50 border border-amber-200 rounded-[10px] p-3">✓ No extra fee to join. You only pay your split freight when your car is ready to ship. We handle container paperwork.</p>
+                <button onClick={()=>setShowFreight(false)} className="w-full bg-zinc-900 text-white py-3 rounded-full text-[12px] font-medium">Got it, join a group</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showTerms && (
+        <div className="fixed inset-0 bg-zinc-900/30 backdrop-blur-[12px] z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-[20px] max-w-[560px] w-full max-h-[85vh] overflow-auto shadow-[0_20px_60px_-20px_rgba(0,0,0,0.3)]">
+            <div className="p-7">
+              <div className="flex justify-between items-start mb-6"><h2 className="font-['Fraunces'] text-[20px] font-[600]">Terms & Conditions</h2><button onClick={()=>setShowTerms(false)} className="w-8 h-8 bg-zinc-100 rounded-full flex items-center justify-center"><X size={14}/></button></div>
+              <div className="space-y-4 text-[12px] leading-[1.6] text-zinc-600">
+                <div><b className="text-zinc-900">1. What BeAhead is</b><br/>BeAhead is a technology platform that helps you save for a BeForward car. We are not a bank, we do not hold your money. Your money is held in your own bank account at a partner bank. We only track your progress.</div>
+                <div><b className="text-zinc-900">2. Money handling</b><br/>You deposit directly into your bank account using reference BA-XXXXXX. Bank holds, verifies, and releases funds to BeForward Japan only when you authorize and have reached your goal. BeAhead never touches client funds.</div>
+                <div><b className="text-zinc-900">3. Total cost</b><br/>Total includes: car price (from BeForward), freight Japan→Durban ($1,150 est.), ZIMRA duty estimate (45-75% based on engine CC and age), clearing & delivery ($350 est.), and BeAhead service fee ($150). Duty is estimate only — real ZIMRA may vary. We cover up to $200 if our estimate is low.</div>
+                <div><b className="text-zinc-900">4. Cancellation</b><br/>You can cancel anytime. Early cancellation fee is 7% of amount saved in your bank, to cover bank admin and reservation costs. Example: saved $1,000 → fee $70 → you receive $930. Fee split: 40% bank, 40% BeAhead, 20% clearing partner.</div>
+                <div><b className="text-zinc-900">5. Car availability</b><br/>BeForward cars sell fast. If your chosen car sells while you save, we will match you with 3 similar cars at same price range. You can switch free, no penalty.</div>
+                <div><b className="text-zinc-900">6. Freight splitting</b><br/>Container freight $1,150 can be shared among up to 3 cars. If you join a group, you pay $575 (2 people) or $383 (3 people) each instead of $1,150. No extra fee to join. You pay split freight only when car ships.</div>
+                <div><b className="text-zinc-900">7. Import</b><br/>We help with paperwork and coordinate clearing at Beitbridge and delivery to Bulawayo via vetted agents. Final import compliance is your responsibility. You must provide valid ID, proof of address, and ZIMRA forms.</div>
+                <div><b className="text-zinc-900">8. Pilot phase</b><br/>We are currently in pilot in Bulawayo. No fake partnerships claimed. We are working to partner with a licensed bank for escrow and licensed clearing agents. Service fee is for technology and coordination only.</div>
+                <div className="pt-4 border-t text-[10px] text-zinc-500">Last updated: Sep 2026 • BeAhead • Built in Bulawayo • Contact: via app support</div>
+              </div>
+              <button onClick={()=>setShowTerms(false)} className="mt-6 w-full bg-zinc-900 text-white py-3 rounded-full text-[12px] font-medium">I agree, close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <footer className="border-t border-zinc-200 mt-12">
-        <div className="max-w-[1120px] mx-auto px-6 py-6 flex justify-between items-center">
-          <div className="flex items-center gap-2"><img src="/logo.png" className="w-5 h-5 rounded-[6px]"/><span className="font-medium text-[11px]">BeAhead</span><span className="text-[10px] text-zinc-500">• Bulawayo • Pilot</span></div>
-          <div className="text-[10px] text-zinc-500">Real product. No fake partnerships. Your money stays in your bank.</div>
+        <div className="max-w-[1120px] mx-auto px-6 py-6 flex flex-col sm:flex-row justify-between gap-3">
+          <div className="flex items-center gap-2"><img src="/logo.png" className="w-5 h-5 rounded-[6px]"/><span className="font-medium text-[11px]">BeAhead</span><span className="text-[10px] text-zinc-500">• Bulawayo • Pilot phase</span></div>
+          <div className="flex items-center gap-4 text-[11px]">
+            <button onClick={()=>setShowTerms(true)} className="font-medium underline hover:text-zinc-900">Terms & Conditions</button>
+            <span className="text-zinc-400">•</span>
+            <span className="text-zinc-500">Your money stays in your bank</span>
+          </div>
         </div>
       </footer>
     </div>

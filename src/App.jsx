@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from './lib/supabase'
-import { calculateLandedCost, calculatePenalty, calculateMonthly, formatUSD } from './utils/calculations'
-import { ArrowRight, Shield, Wallet, Car, Clock, Plus, LogOut, Upload, X, Check, Calculator, Map, FileCheck, Bell, Users, Zap, Target, TrendingDown } from 'lucide-react'
+import { calculateLandedCost, calculateMonthly, formatUSD } from './utils/calculations'
+import { ArrowRight, Shield, Wallet, Car, Clock, Plus, LogOut, X, Check, Calculator, Map, FileCheck, Bell, Users, Zap, Target, TrendingDown, AlertCircle } from 'lucide-react'
 
 export default function App() {
   const [user, setUser] = useState(null)
@@ -12,12 +12,14 @@ export default function App() {
   const [selectedCar, setSelectedCar] = useState(null)
   const [showNewCar, setShowNewCar] = useState(false)
   const [showAgreement, setShowAgreement] = useState(false)
-  const [showCalculator, setShowCalculator] = useState(false)
   const [loading, setLoading] = useState(true)
   const [authForm, setAuthForm] = useState({ email: '', password: '', fullName: '', phone: '' })
-  const [depositForm, setDepositForm] = useState({ goalId: '', amount: '', method: 'bank_transfer', reference: '' })
   const [newCarForm, setNewCarForm] = useState({ make: '', model: '', year: '', price: '', url: '', mileage: '', engine: '' })
-  const [calcForm, setCalcForm] = useState({ price: '3250', engine: '1500', year: '2015' })
+  
+  // Attractive features state
+  const [dutyCalc, setDutyCalc] = useState({ price: '3250', engine: '1500', year: '2015' })
+  const [checklist, setChecklist] = useState({ invoice: false, id: false, proof: false, zimra: false, license: false })
+  const [priceAlerts, setPriceAlerts] = useState({})
 
   useEffect(() => {
     init()
@@ -114,14 +116,12 @@ export default function App() {
       status: 'available',
       duty_rate: 0.55
     }
-    const { data, error } = await supabase.from('beahead_cars').insert(carData).select().single()
-    if (error) {
-      alert('Could not save car.')
-      return
+    const { data } = await supabase.from('beahead_cars').insert(carData).select().single()
+    if (data) {
+      setSelectedCar(data)
+      setShowNewCar(false)
+      setShowAgreement(true)
     }
-    setSelectedCar(data)
-    setShowNewCar(false)
-    setShowAgreement(true)
     setNewCarForm({ make: '', model: '', year: '', price: '', url: '', mileage: '', engine: '' })
   }
 
@@ -146,53 +146,29 @@ export default function App() {
       penalty_rate: 0.07,
       monthly_target: calculateMonthly(calc.total, 12),
     }
-
-    const { data, error } = await supabase.from('beahead_goals').insert(goalData).select('*, beahead_cars(*)').single()
-    if (error) {
-      alert('Could not create plan.')
-      return
-    }
-    setGoals([data, ...goals])
+    const { data } = await supabase.from('beahead_goals').insert(goalData).select('*, beahead_cars(*)').single()
+    if (data) setGoals([data, ...goals])
     setShowAgreement(false)
     setSelectedCar(null)
   }
 
-  const addDeposit = async (e) => {
-    e.preventDefault()
-    const goal = goals.find(g => g.id === depositForm.goalId)
-    if (!goal) return
-    
-    const dep = {
-      goal_id: depositForm.goalId,
-      user_id: user.id,
-      amount_usd: Number(depositForm.amount),
-      method: depositForm.method,
-      reference_code: depositForm.reference,
-      verification_status: 'pending',
-    }
-
-    const { data } = await supabase.from('beahead_deposits').insert(dep).select('*, beahead_goals(*, beahead_cars(*))').single()
-    if (data) {
-      setDeposits([data, ...deposits])
-      setTimeout(async () => {
-        await supabase.from('beahead_deposits').update({ verification_status: 'verified', verified_at: new Date().toISOString() }).eq('id', data.id)
-        const { data: allDeps } = await supabase.from('beahead_deposits').select('amount_usd').eq('goal_id', dep.goal_id).eq('verification_status','verified')
-        const totalSaved = allDeps?.reduce((s,d)=>s+Number(d.amount_usd),0) || 0
-        await supabase.from('beahead_goals').update({ saved_amount_usd: totalSaved, progress_percent: (totalSaved/goal.goal_amount_usd)*100 }).eq('id', dep.goal_id)
-        loadData(user.id)
-      }, 1000)
-    }
-    setDepositForm({ goalId: '', amount: '', method: 'bank_transfer', reference: '' })
-  }
-
-  const handleCancel = async (goal) => {
-    const penalty = calculatePenalty(goal.saved_amount_usd || 0)
-    if (!confirm(`Cancel ${goal.beahead_cars?.make} ${goal.beahead_cars?.model}?\n\nSaved: ${formatUSD(goal.saved_amount_usd)}\nFee (7%): ${formatUSD(penalty.totalPenalty)}\nYou receive: ${formatUSD((goal.saved_amount_usd||0) - penalty.totalPenalty)}`)) return
-    await supabase.from('beahead_goals').update({ status: 'cancelled' }).eq('id', goal.id)
-    loadData(user.id)
-  }
-
-  const calcPreview = calculateLandedCost({ price_usd: parseFloat(calcForm.price)||0, freight_usd: 1150, duty_rate: 0.55, engine_cc: parseInt(calcForm.engine)||1500, year: parseInt(calcForm.year)||2015, beforward_ref: 'PREVIEW' })
+  // Duty calculator logic
+  const dutyResult = (() => {
+    const price = parseFloat(dutyCalc.price) || 0
+    const engine = parseInt(dutyCalc.engine) || 1500
+    const year = parseInt(dutyCalc.year) || 2015
+    const age = new Date().getFullYear() - year
+    let rate = 0.5
+    if (engine <= 1000) rate = 0.45
+    else if (engine <= 1500) rate = 0.55
+    else if (engine <= 2000) rate = 0.65
+    else rate = 0.75
+    if (age > 5) rate += 0.15
+    if (age > 10) rate += 0.20
+    const duty = price * rate
+    const total = price + 1150 + duty + 350 + (price * 0.03)
+    return { rate: Math.round(rate*100), duty: Math.round(duty), total: Math.round(total) }
+  })()
 
   if (loading) return (
     <div className="min-h-screen bg-[#fafaf9] flex items-center justify-center">
@@ -235,14 +211,11 @@ export default function App() {
                   Save for your<br/>BeForward car,<br/><span className="text-zinc-400">month by month.</span>
                 </h1>
                 <p className="mt-5 text-[15px] leading-[1.6] text-zinc-600 max-w-[460px]">
-                  Paste any car from BeForward.jp. We show the full cost to get it to Zimbabwe. Save small amounts monthly in your own account. Import when you're ready.
+                  Paste any car from BeForward.jp. We show the full cost to get it to Zimbabwe. Save small amounts monthly in your own bank account. Import when you're ready.
                 </p>
                 <div className="mt-7 flex gap-3">
                   <button onClick={() => setView('auth')} className="bg-zinc-900 text-white px-6 py-3 rounded-full text-[13px] font-medium flex items-center gap-2 hover:bg-black transition">
                     Start your plan <ArrowRight size={15}/>
-                  </button>
-                  <button onClick={() => setShowCalculator(true)} className="bg-white border border-zinc-200 px-5 py-3 rounded-full text-[13px] font-medium flex items-center gap-1.5 hover:border-zinc-300">
-                    <Calculator size={14}/> Calculate cost
                   </button>
                 </div>
                 <div className="mt-8 flex flex-wrap gap-4 text-[11px] text-zinc-500">
@@ -266,53 +239,30 @@ export default function App() {
                     <div className="bg-white/10 rounded-[10px] p-2.5"><div className="text-zinc-400 text-[9px]">Left</div><div className="font-medium mt-0.5">$3,837</div></div>
                   </div>
                 </div>
-                <div className="p-3.5 flex items-center gap-2 text-[11px] text-zinc-600"><div className="w-6 h-6 bg-zinc-100 rounded-full flex items-center justify-center"><Car size={12}/></div> Toyota Aqua 2015 • 85k km • Hybrid • Your plan</div>
+                <div className="p-3.5 flex items-center gap-2 text-[11px] text-zinc-600"><div className="w-6 h-6 bg-zinc-100 rounded-full flex items-center justify-center"><Car size={12}/></div> Toyota Aqua 2015 • Your savings plan</div>
               </div>
             </div>
           </section>
 
-          <section className="max-w-[1120px] mx-auto px-6 pb-6">
-            <div className="grid md:grid-cols-3 gap-3">
-              {[
-                { icon: Calculator, title: 'True cost calculator', desc: 'Car price + freight $1,150 + ZIMRA duty (50-55%) + clearing $350 + service fee. No surprises at Beitbridge.' },
-                { icon: Target, title: 'Flexible monthly plans', desc: 'Choose 6, 12, 18 or 24 months. Save $50 or $500. Change anytime. Progress tracked automatically.' },
-                { icon: Map, title: 'Import timeline tracker', desc: 'Japan → Durban → Beitbridge → Bulawayo. See exactly where your car is and what documents are needed next.' },
-                { icon: FileCheck, title: 'Document checklist', desc: 'Proforma invoice, TT copy, ID, proof of address, ZIMRA forms. We guide you step by step so you don\'t get stuck.' },
-                { icon: Bell, title: 'Price drop alerts', desc: 'Save a car, we watch its price on BeForward. If it drops, you get notified instantly to lock it.' },
-                { icon: TrendingDown, title: 'Duty estimator', desc: 'Enter engine CC and year, get ZIMRA duty estimate based on real rates. Avoid $2,000 surprises.' },
-                { icon: Users, title: 'Group buying', desc: 'Join others buying same model (Aqua, Fit). Share container, split freight, lower costs. Community savings.' },
-                { icon: Zap, title: 'Top-up boost', desc: 'Saved 80% but car about to sell? Get a small top-up to secure it now, pay back next month. No bank trip.' },
-                { icon: Shield, title: 'Escrow protection', desc: 'Money stays in your bank account until you authorize release. If car deal fails, you get refund. No middleman holding cash.' },
-              ].map((f,i)=>(
-                <div key={i} className="bg-white border border-zinc-200 rounded-[18px] p-5 hover:border-zinc-300 hover:shadow-[0_8px_24px_-12px_rgba(0,0,0,0.1)] transition">
-                  <div className="w-8 h-8 bg-zinc-900 text-white rounded-full flex items-center justify-center mb-3"><f.icon size={14}/></div>
-                  <div className="font-medium text-[13px]">{f.title}</div>
-                  <div className="text-[12px] leading-[1.5] text-zinc-600 mt-1.5">{f.desc}</div>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <section className="max-w-[1120px] mx-auto px-6 py-10">
+          <section className="max-w-[1120px] mx-auto px-6 pb-10">
             <div className="bg-zinc-900 rounded-[24px] p-7 md:p-10 text-white relative overflow-hidden">
               <div className="absolute top-0 right-0 w-[360px] h-[360px] bg-white/[0.04] rounded-full blur-[70px] -translate-y-1/2 translate-x-1/3"></div>
               <div className="relative grid md:grid-cols-[1.1fr_0.9fr] gap-8 items-center">
                 <div>
-                  <div className="inline-flex bg-white/10 border border-white/10 rounded-full px-3 py-1 text-[10px] tracking-widest mb-4">HOW TOTAL COST WORKS</div>
+                  <div className="inline-flex bg-white/10 border border-white/10 rounded-full px-3 py-1 text-[10px] tracking-widest mb-4">TRANSPARENT PRICING</div>
                   <h3 className="font-['Fraunces'] text-[26px] leading-[0.95]">No hidden fees.<br/>Everything upfront.</h3>
-                  <p className="text-[13px] leading-[1.6] text-zinc-400 mt-3 max-w-[360px]">We show car price, freight, duty, clearing and our small service fee before you save a dollar. You know exactly what you'll pay to get it to Zimbabwe.</p>
+                  <p className="text-[13px] leading-[1.6] text-zinc-400 mt-3 max-w-[360px]">Car price, freight, duty, clearing and our small service fee — calculated before you save a dollar.</p>
                 </div>
                 <div className="bg-white rounded-[18px] p-5 text-zinc-900">
                   <div className="text-[10px] tracking-widest text-zinc-500 font-medium">EXAMPLE • TOYOTA AQUA 2015</div>
                   <div className="mt-3 space-y-2 text-[12px]">
-                    <div className="flex justify-between"><span className="text-zinc-500">Car price (BeForward)</span><span className="font-medium">$3,250</span></div>
+                    <div className="flex justify-between"><span className="text-zinc-500">Car price</span><span className="font-medium">$3,250</span></div>
                     <div className="flex justify-between"><span className="text-zinc-500">Freight Japan → Durban</span><span className="font-medium">$1,150</span></div>
-                    <div className="flex justify-between"><span className="text-zinc-500">ZIMRA duty (55% est.)</span><span className="font-medium">$1,787</span></div>
+                    <div className="flex justify-between"><span className="text-zinc-500">ZIMRA duty est.</span><span className="font-medium">$1,787</span></div>
                     <div className="flex justify-between"><span className="text-zinc-500">Clearing & delivery</span><span className="font-medium">$350</span></div>
-                    <div className="flex justify-between"><span className="text-zinc-500">BeAhead service fee</span><span className="font-medium">$150</span></div>
+                    <div className="flex justify-between"><span className="text-zinc-500">Service fee</span><span className="font-medium">$150</span></div>
                     <div className="h-px bg-zinc-100 my-2"></div>
                     <div className="flex justify-between font-semibold"><span>Total to own</span><span>$6,687</span></div>
-                    <div className="text-[11px] text-zinc-500">12 months × $557/mo • Cancel anytime, 7% fee only if you cancel early</div>
                   </div>
                 </div>
               </div>
@@ -351,61 +301,116 @@ export default function App() {
           <div className="flex items-center justify-between mb-6">
             <div>
               <h2 className="font-['Fraunces'] text-[22px] font-[600] tracking-[-0.02em]">Your savings</h2>
-              <p className="text-[11px] text-zinc-500 mt-1">{profile?.bank_account_number} • Your savings reference</p>
+              <p className="text-[11px] text-zinc-500 mt-1">{profile?.bank_account_number} • Your savings reference — deposit to your own bank account</p>
             </div>
             <button onClick={()=>setShowNewCar(true)} className="bg-zinc-900 text-white px-4 py-2.5 rounded-full text-[11px] font-medium flex items-center gap-1.5"><Plus size={13}/> Add car</button>
           </div>
 
-          <div className="grid md:grid-cols-3 gap-3 mb-6">
-            <div className="bg-white border border-zinc-200 rounded-[14px] p-4"><div className="text-[10px] text-zinc-500">Total saved</div><div className="text-[20px] font-semibold tracking-tight mt-1">{formatUSD(goals.reduce((s,g)=>s+(g.saved_amount_usd||0),0))}</div></div>
-            <div className="bg-white border border-zinc-200 rounded-[14px] p-4"><div className="text-[10px] text-zinc-500">Active plans</div><div className="text-[20px] font-semibold tracking-tight mt-1">{goals.filter(g=>g.status==='active').length}</div></div>
-            <div className="bg-zinc-900 text-white rounded-[14px] p-4"><div className="text-[10px] text-zinc-400">Next</div><div className="text-[12px] font-medium mt-1">{goals[0] ? `${Math.round(goals[0].progress_percent||0)}% to ${goals[0].beahead_cars?.make}` : 'Add a car to start'}</div></div>
-          </div>
-
           <div className="grid lg:grid-cols-[1.2fr_0.8fr] gap-5">
-            <div>
-              <div className="flex items-center justify-between mb-3"><h3 className="font-medium text-[13px]">Your plans</h3><span className="text-[11px] text-zinc-500">{goals.length} plans</span></div>
-              {goals.length===0 ? (
-                <div className="bg-white border border-dashed border-zinc-300 rounded-[18px] p-8 text-center">
-                  <div className="w-11 h-11 bg-zinc-100 rounded-full flex items-center justify-center mx-auto mb-3"><Car size={18} className="text-zinc-500"/></div>
-                  <div className="font-medium text-[13px]">No plans yet</div>
-                  <div className="text-[11px] text-zinc-500 mt-1 max-w-[280px] mx-auto">Paste a BeForward link to create your first savings plan. We calculate full cost to Zimbabwe.</div>
-                  <button onClick={()=>setShowNewCar(true)} className="mt-4 bg-zinc-900 text-white px-4 py-2 rounded-full text-[11px] font-medium">Add your first car</button>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {goals.map(goal => (
-                    <div key={goal.id} className="bg-white border border-zinc-200 rounded-[14px] p-4">
-                      <div className="flex justify-between"><div><div className="font-medium text-[12px]">{goal.beahead_cars?.make} {goal.beahead_cars?.model} {goal.beahead_cars?.year}</div><div className="text-[10px] text-zinc-500">{formatUSD(goal.goal_amount_usd)} total • {goal.escrow_account_number}</div></div><span className="text-[10px] px-2 py-1 rounded-full bg-zinc-900 text-white">{goal.status}</span></div>
-                      <div className="mt-3"><div className="flex justify-between text-[10px] mb-1"><span className="text-zinc-500">{formatUSD(goal.saved_amount_usd||0)} saved</span><span className="font-medium">{Math.round(goal.progress_percent||0)}%</span></div><div className="h-1.5 bg-zinc-100 rounded-full overflow-hidden"><div className="h-full bg-zinc-900 rounded-full" style={{width:`${Math.min(100, goal.progress_percent||0)}%`}}></div></div></div>
-                      <div className="mt-3 flex gap-2"><button onClick={()=>setDepositForm({...depositForm, goalId: goal.id})} className="flex-1 bg-zinc-900 text-white text-[11px] py-2 rounded-full">Add money</button><button onClick={()=>handleCancel(goal)} className="flex-1 border border-zinc-200 text-[11px] py-2 rounded-full">Cancel</button></div>
+            <div className="space-y-5">
+              <div>
+                <div className="flex items-center justify-between mb-3"><h3 className="font-medium text-[13px]">Your plans</h3><span className="text-[11px] text-zinc-500">{goals.length} plans</span></div>
+                {goals.length===0 ? (
+                  <div className="bg-white border border-dashed border-zinc-300 rounded-[18px] p-8 text-center">
+                    <div className="w-11 h-11 bg-zinc-100 rounded-full flex items-center justify-center mx-auto mb-3"><Car size={18} className="text-zinc-500"/></div>
+                    <div className="font-medium text-[13px]">No plans yet</div>
+                    <div className="text-[11px] text-zinc-500 mt-1 max-w-[280px] mx-auto">Paste a BeForward link to create your first savings plan. We calculate full cost to Zimbabwe.</div>
+                    <button onClick={()=>setShowNewCar(true)} className="mt-4 bg-zinc-900 text-white px-4 py-2 rounded-full text-[11px] font-medium">Add your first car</button>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {goals.map(goal => (
+                      <div key={goal.id} className="bg-white border border-zinc-200 rounded-[16px] p-5">
+                        <div className="flex justify-between"><div><div className="font-medium text-[12px]">{goal.beahead_cars?.make} {goal.beahead_cars?.model} {goal.beahead_cars?.year}</div><div className="text-[10px] text-zinc-500">{formatUSD(goal.goal_amount_usd)} total • Ref: {goal.escrow_account_number}</div></div><span className="text-[10px] px-2 py-1 rounded-full bg-zinc-900 text-white">{goal.status}</span></div>
+                        <div className="mt-3"><div className="flex justify-between text-[10px] mb-1"><span className="text-zinc-500">{formatUSD(goal.saved_amount_usd||0)} saved in your bank</span><span className="font-medium">{Math.round(goal.progress_percent||0)}%</span></div><div className="h-1.5 bg-zinc-100 rounded-full overflow-hidden"><div className="h-full bg-zinc-900 rounded-full" style={{width:`${Math.min(100, goal.progress_percent||0)}%`}}></div></div></div>
+                        <div className="mt-3 bg-zinc-50 rounded-[10px] p-2.5 flex items-center gap-2 text-[10px] text-zinc-600"><Shield size={11}/> Money held in your bank account, not by BeAhead. We track it, bank holds it.</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-white border border-zinc-200 rounded-[16px] p-5">
+                <div className="font-medium text-[13px] flex items-center gap-1.5"><Map size={14}/> Import timeline tracker</div>
+                <div className="mt-4 relative">
+                  <div className="absolute left-[11px] top-2 bottom-2 w-px bg-zinc-200"></div>
+                  {[
+                    { title: 'Japan - Purchase', desc: 'Car bought in Japan, documents prepared', time: 'Day 1-3', done: (goals[0]?.progress_percent||0) >= 100 },
+                    { title: 'Shipping to Durban', desc: 'Container ship Japan → Durban, South Africa', time: '3-5 weeks', done: false },
+                    { title: 'Clearing at Beitbridge', desc: 'ZIMRA duty, inspection, import docs', time: '2-4 days', done: false },
+                    { title: 'Delivery to Bulawayo', desc: 'Driver brings car to your door, final checks', time: '1-2 days', done: false },
+                  ].map((step,i)=>(
+                    <div key={i} className="relative flex gap-3 pb-5 last:pb-0">
+                      <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${step.done ? 'bg-zinc-900 text-white' : 'bg-white border border-zinc-300'}`}>{step.done ? <Check size={12}/> : <span className="w-1.5 h-1.5 bg-zinc-400 rounded-full"></span>}</div>
+                      <div className="flex-1 -mt-0.5"><div className="flex justify-between"><span className="text-[12px] font-medium">{step.title}</span><span className="text-[10px] text-zinc-500">{step.time}</span></div><div className="text-[11px] text-zinc-500 mt-0.5">{step.desc}</div></div>
                     </div>
                   ))}
                 </div>
-              )}
+              </div>
             </div>
 
             <div className="space-y-4">
-              <div className="bg-white border border-zinc-200 rounded-[16px] p-4">
-                <div className="font-medium text-[12px]">Add money</div>
-                <div className="text-[11px] text-zinc-500 mt-0.5">EcoCash, InnBucks, bank transfer or cash</div>
-                <form onSubmit={addDeposit} className="mt-3 space-y-2.5">
-                  <select value={depositForm.goalId} onChange={e=>setDepositForm({...depositForm, goalId:e.target.value})} className="w-full bg-zinc-50 border border-zinc-200 rounded-full px-3 py-2.5 text-[11px] focus:outline-none focus:border-zinc-900" required><option value="">Select plan</option>{goals.filter(g=>g.status==='active').map(g=><option key={g.id} value={g.id}>{g.beahead_cars?.make} {g.beahead_cars?.model}</option>)}</select>
-                  <input type="number" placeholder="Amount USD" value={depositForm.amount} onChange={e=>setDepositForm({...depositForm, amount:e.target.value})} className="w-full bg-zinc-50 border border-zinc-200 rounded-full px-3 py-2.5 text-[11px] focus:outline-none focus:border-zinc-900" required/>
-                  <select value={depositForm.method} onChange={e=>setDepositForm({...depositForm, method:e.target.value})} className="w-full bg-zinc-50 border border-zinc-200 rounded-full px-3 py-2.5 text-[11px] focus:outline-none focus:border-zinc-900"><option value="bank_transfer">Bank transfer</option><option value="cash_deposit">Cash at bank</option><option value="ecocash">EcoCash</option><option value="innbucks">InnBucks</option></select>
-                  <input placeholder="Reference code" value={depositForm.reference} onChange={e=>setDepositForm({...depositForm, reference:e.target.value})} className="w-full bg-zinc-50 border border-zinc-200 rounded-full px-3 py-2.5 text-[11px] focus:outline-none focus:border-zinc-900" required/>
-                  <button type="submit" className="w-full bg-zinc-900 text-white py-2.5 rounded-full text-[11px] font-medium">Submit deposit</button>
-                </form>
+              <div className="bg-white border border-zinc-200 rounded-[16px] p-5">
+                <div className="font-medium text-[13px] flex items-center gap-1.5"><Calculator size={14}/> Duty calculator</div>
+                <div className="text-[11px] text-zinc-500 mt-1">Real ZIMRA rates by engine CC & age</div>
+                <div className="mt-4 space-y-3">
+                  <div className="grid grid-cols-3 gap-2">
+                    <div><div className="text-[10px] text-zinc-500 mb-1">Price USD</div><input type="number" value={dutyCalc.price} onChange={e=>setDutyCalc({...dutyCalc, price:e.target.value})} className="w-full bg-zinc-50 border border-zinc-200 rounded-full px-3 py-2 text-[11px] focus:outline-none focus:border-zinc-900"/></div>
+                    <div><div className="text-[10px] text-zinc-500 mb-1">Engine CC</div><input type="number" value={dutyCalc.engine} onChange={e=>setDutyCalc({...dutyCalc, engine:e.target.value})} className="w-full bg-zinc-50 border border-zinc-200 rounded-full px-3 py-2 text-[11px] focus:outline-none focus:border-zinc-900"/></div>
+                    <div><div className="text-[10px] text-zinc-500 mb-1">Year</div><input type="number" value={dutyCalc.year} onChange={e=>setDutyCalc({...dutyCalc, year:e.target.value})} className="w-full bg-zinc-50 border border-zinc-200 rounded-full px-3 py-2 text-[11px] focus:outline-none focus:border-zinc-900"/></div>
+                  </div>
+                  <div className="bg-zinc-900 text-white rounded-[12px] p-3">
+                    <div className="flex justify-between text-[11px]"><span className="text-zinc-400">Duty rate</span><span className="font-medium">{dutyResult.rate}%</span></div>
+                    <div className="flex justify-between text-[11px] mt-1"><span className="text-zinc-400">Duty amount</span><span className="font-medium">{formatUSD(dutyResult.duty)}</span></div>
+                    <div className="flex justify-between text-[12px] font-semibold mt-2 pt-2 border-t border-white/10"><span>Total landed</span><span>{formatUSD(dutyResult.total)}</span></div>
+                  </div>
+                  <div className="text-[10px] text-zinc-500 flex gap-1"><AlertCircle size={10}/> Estimate only. Real ZIMRA may vary. We cover up to $200 if we miscalculate.</div>
+                </div>
               </div>
 
-              <div className="bg-white border border-zinc-200 rounded-[16px] p-4">
-                <div className="font-medium text-[12px] flex items-center gap-1.5"><Bell size={12}/> Attractive features coming</div>
-                <div className="mt-2 space-y-2 text-[11px] text-zinc-600">
-                  <div className="flex gap-2"><span className="text-zinc-900">•</span> Price drop alerts for saved cars</div>
-                  <div className="flex gap-2"><span className="text-zinc-900">•</span> Duty calculator by engine CC & year</div>
-                  <div className="flex gap-2"><span className="text-zinc-900">•</span> Import timeline: Japan → Durban → Zim</div>
-                  <div className="flex gap-2"><span className="text-zinc-900">•</span> Document checklist so you don't get stuck</div>
-                  <div className="flex gap-2"><span className="text-zinc-900">•</span> Group buying to share freight costs</div>
+              <div className="bg-white border border-zinc-200 rounded-[16px] p-5">
+                <div className="font-medium text-[13px] flex items-center gap-1.5"><FileCheck size={14}/> Document checklist</div>
+                <div className="text-[11px] text-zinc-500 mt-1">Don't get stuck at Beitbridge</div>
+                <div className="mt-3 space-y-2.5">
+                  {[
+                    { key: 'invoice', label: 'BeForward proforma invoice', desc: 'From Japan with chassis number' },
+                    { key: 'id', label: 'National ID + Passport', desc: 'Certified copies' },
+                    { key: 'proof', label: 'Proof of address', desc: 'Utility bill, not older than 3 months' },
+                    { key: 'zimra', label: 'ZIMRA import forms', desc: 'Form 49 + duty payment proof' },
+                    { key: 'license', label: 'Driver license + insurance', desc: 'For collection' },
+                  ].map(item=>(
+                    <label key={item.key} className="flex gap-2.5 p-2.5 rounded-[10px] hover:bg-zinc-50 cursor-pointer border border-transparent hover:border-zinc-100">
+                      <input type="checkbox" checked={checklist[item.key]} onChange={e=>setChecklist({...checklist, [item.key]: e.target.checked})} className="mt-0.5 rounded"/>
+                      <div className="flex-1"><div className="text-[11px] font-medium flex items-center gap-1.5">{item.label} {checklist[item.key] && <Check size={10} className="text-green-600"/>}</div><div className="text-[10px] text-zinc-500">{item.desc}</div></div>
+                    </label>
+                  ))}
+                  <div className="mt-2 bg-zinc-50 rounded-full h-1.5 overflow-hidden"><div className="h-full bg-zinc-900 transition-all" style={{width: `${Object.values(checklist).filter(Boolean).length/5*100}%`}}></div></div>
+                  <div className="text-[10px] text-zinc-500 text-center">{Object.values(checklist).filter(Boolean).length}/5 documents ready</div>
+                </div>
+              </div>
+
+              <div className="bg-white border border-zinc-200 rounded-[16px] p-5">
+                <div className="font-medium text-[13px] flex items-center gap-1.5"><Bell size={14}/> Price alerts & group buying</div>
+                <div className="mt-3 space-y-3">
+                  {goals.slice(0,2).map(goal=>(
+                    <div key={goal.id} className="flex items-center justify-between bg-zinc-50 rounded-[10px] p-2.5">
+                      <div><div className="text-[11px] font-medium">{goal.beahead_cars?.make} {goal.beahead_cars?.model}</div><div className="text-[10px] text-zinc-500">Alert if price drops below {formatUSD(goal.car_price_usd)}</div></div>
+                      <button onClick={()=>setPriceAlerts({...priceAlerts, [goal.id]: !priceAlerts[goal.id]})} className={`w-9 h-5 rounded-full p-0.5 transition ${priceAlerts[goal.id] ? 'bg-zinc-900' : 'bg-zinc-300'}`}><div className={`w-4 h-4 bg-white rounded-full transition ${priceAlerts[goal.id] ? 'translate-x-4' : ''}`}></div></button>
+                    </div>
+                  ))}
+                  {goals.length===0 && <div className="text-[11px] text-zinc-500 py-2">Add a car to enable price alerts. We'll watch BeForward and notify you if price drops.</div>}
+                  <div className="bg-[#f4f4f0] rounded-[10px] p-3">
+                    <div className="flex items-center gap-1.5 text-[11px] font-medium"><Users size={12}/> Group buying</div>
+                    <div className="text-[11px] text-zinc-600 mt-1">2 others saving for Toyota Aqua in Bulawayo. Join to share container and split freight $1,150 → $575 each.</div>
+                    <button className="mt-2 text-[11px] font-medium underline">Join group →</button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-zinc-900 text-white rounded-[16px] p-4">
+                <div className="text-[11px] font-medium flex items-center gap-1.5"><Shield size={12}/> Where your money goes</div>
+                <div className="text-[11px] leading-[1.5] text-zinc-400 mt-2">
+                  We don't hold your money. You deposit directly into your own bank account using reference <span className="text-white font-mono">{profile?.bank_account_number || 'BA-XXXXXX'}</span>. We only track it. Bank holds it, bank verifies it, bank releases it to BeForward when you're ready. No middleman holding cash.
                 </div>
               </div>
             </div>
@@ -466,7 +471,7 @@ export default function App() {
       <footer className="border-t border-zinc-200 mt-12">
         <div className="max-w-[1120px] mx-auto px-6 py-6 flex justify-between items-center">
           <div className="flex items-center gap-2"><img src="/logo.png" className="w-5 h-5 rounded-[6px]"/><span className="font-medium text-[11px]">BeAhead</span><span className="text-[10px] text-zinc-500">• Bulawayo • Pilot</span></div>
-          <div className="text-[10px] text-zinc-500">No fake partnerships. Real product. Real savings reference.</div>
+          <div className="text-[10px] text-zinc-500">Real product. No fake partnerships. Your money stays in your bank.</div>
         </div>
       </footer>
     </div>

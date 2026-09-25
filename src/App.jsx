@@ -85,10 +85,26 @@ export default function App() {
   }
 
   const loadData = async (userId) => {
-    const { data: goalsData } = await supabase.from('beahead_goals').select('*, beahead_cars(*)').eq('user_id', userId).order('created_at', { ascending: false })
-    if (goalsData) setGoals(goalsData)
-    const { data: depData } = await supabase.from('beahead_deposits').select('*').eq('user_id', userId).order('created_at', { ascending: false })
-    if (depData) setDeposits(depData)
+    try {
+      const { data: goalsData } = await supabase.from('beahead_goals').select('*').eq('user_id', userId).order('created_at', { ascending: false })
+      if (goalsData && goalsData.length > 0) {
+        // Fetch cars separately to avoid FK cache issue
+        const carIds = [...new Set(goalsData.map(g=>g.car_id).filter(Boolean))]
+        let carsMap = {}
+        if (carIds.length > 0) {
+          const { data: carsData } = await supabase.from('beahead_cars').select('*').in('id', carIds)
+          if (carsData) carsData.forEach(c=>{ carsMap[c.id]=c })
+        }
+        const enriched = goalsData.map(g=>({ ...g, beahead_cars: carsMap[g.car_id] || null }))
+        setGoals(enriched)
+      } else if (goalsData) {
+        setGoals(goalsData)
+      }
+    } catch (e) { console.log('loadData goals error', e.message) }
+    try {
+      const { data: depData } = await supabase.from('beahead_deposits').select('*').eq('user_id', userId).order('created_at', { ascending: false })
+      if (depData) setDeposits(depData)
+    } catch (e) { console.log('loadData deposits error', e.message) }
   }
 
   const handleAuth = async (mode) => {
@@ -207,26 +223,43 @@ export default function App() {
     try {
       const [profilesRes, goalsRes, depositsRes, carsRes, adminProfilesRes] = await Promise.all([
         supabase.from('beahead_profiles').select('*').order('created_at', { ascending: false }).limit(200),
-        supabase.from('beahead_goals').select('*, beahead_cars(*)').order('created_at', { ascending: false }).limit(200),
+        supabase.from('beahead_goals').select('*').order('created_at', { ascending: false }).limit(200),
         supabase.from('beahead_deposits').select('*').order('created_at', { ascending: false }).limit(200),
         supabase.from('beahead_cars').select('*').order('created_at', { ascending: false }).limit(200),
         supabase.from('beahead_profiles').select('*').in('role', ['admin','superadmin','beahead_admin']).order('created_at', { ascending: false })
       ])
+
+      // Enrich goals with cars
+      let carsMap = {}
+      if (carsRes.data) carsRes.data.forEach(c=>{ carsMap[c.id]=c })
+      const enrichedGoals = (goalsRes.data || []).map(g=>({ ...g, beahead_cars: carsMap[g.car_id] || null }))
+
       const allAdmins = [...adminsList]
       if (adminProfilesRes.data) {
         adminProfilesRes.data.forEach(p => {
-          if (p.full_name === 'HaroldMilan' && p.id === '00000000-0000-0000-0000-000000000001') return // skip placeholder
+          if (p.id === '00000000-0000-0000-0000-000000000001') return
           const obj = { id: p.id, username: p.full_name, password: p.phone, role: p.role === 'beahead_admin' ? 'admin' : p.role, created_at: p.created_at, fromProfile: true }
           if (!allAdmins.find(c => c.username === obj.username)) allAdmins.push(obj)
         })
       }
+
+      try {
+        const { data: adminTableData } = await supabase.from('beahead_admins').select('*').limit(50)
+        if (adminTableData) {
+          adminTableData.forEach(a => {
+            if (!allAdmins.find(c => c.username === a.username)) allAdmins.push(a)
+          })
+        }
+      } catch {}
+
       setAdminData({
         profiles: profilesRes.data || [],
-        goals: goalsRes.data || [],
+        goals: enrichedGoals,
         deposits: depositsRes.data || [],
         cars: carsRes.data || [],
         admins: allAdmins
       })
+      
       if (allAdmins.length !== adminsList.length) {
         setAdminsList(allAdmins)
         localStorage.setItem('beahead_admins_v2', JSON.stringify(allAdmins))

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from './lib/supabase'
 import { calculateLandedCost, calculateMonthly, formatUSD } from './utils/calculations'
-import { ArrowRight, Shield, Wallet, Car, Clock, Plus, LogOut, X, Check, Calculator, Map, FileCheck, Bell, Users, Zap, Target, TrendingDown, AlertCircle, Package, Ship } from 'lucide-react'
+import { ArrowRight, Shield, Wallet, Car, Clock, Plus, LogOut, X, Check, Calculator, Map, FileCheck, Package, Ship, Users, DollarSign, TrendingUp, Eye, Trash2, UserPlus, Lock, BarChart3, Settings } from 'lucide-react'
 
 export default function App() {
   const [user, setUser] = useState(null)
@@ -20,13 +20,32 @@ export default function App() {
   const [dutyCalc, setDutyCalc] = useState({ price: '3250', engine: '1500', year: '2015' })
   const [checklist, setChecklist] = useState({ invoice: false, id: false, proof: false, zimra: false, license: false })
   const [freightGroups, setFreightGroups] = useState([
-    { id: '1', make: 'Toyota', model: 'Aqua', members: 2, freightTotal: 1150, route: 'Japan → Durban → Bulawayo', leaving: '15 Oct 2026', spaces: 1 },
-    { id: '2', make: 'Honda', model: 'Fit', members: 1, freightTotal: 1150, route: 'Japan → Dar es Salaam → Bulawayo', leaving: '22 Oct 2026', spaces: 2 },
+    { id: '1', make: 'Toyota', model: 'Aqua', members: 2, freightTotal: 1150, route: 'Japan → Durban → Bulawayo', leaving: '15 Oct 2026', spaces: 1, membersList: ['BA-123456', 'BA-789012'] },
+    { id: '2', make: 'Honda', model: 'Fit', members: 1, freightTotal: 1150, route: 'Japan → Dar es Salaam → Bulawayo', leaving: '22 Oct 2026', spaces: 2, membersList: ['BA-345678'] },
   ])
   const [joinedGroups, setJoinedGroups] = useState([])
 
+  // Admin states
+  const [adminUser, setAdminUser] = useState(null)
+  const [adminLoginForm, setAdminLoginForm] = useState({ username: '', password: '' })
+  const [adminTab, setAdminTab] = useState('overview')
+  const [adminData, setAdminData] = useState({ profiles: [], goals: [], deposits: [], cars: [], admins: [] })
+  const [adminsList, setAdminsList] = useState([])
+  const [newAdminForm, setNewAdminForm] = useState({ username: '', password: '', role: 'admin' })
+  const [showNewFreightGroup, setShowNewFreightGroup] = useState(false)
+  const [newFreightForm, setNewFreightForm] = useState({ make: '', model: '', route: 'Japan → Durban → Bulawayo', leaving: '', freightTotal: 1150 })
+
   useEffect(() => {
     init()
+    // Check if admin route
+    if (window.location.pathname.startsWith('/admin')) {
+      setView('adminLogin')
+    }
+    // Load admins from localStorage
+    const stored = localStorage.getItem('beahead_admins_v2')
+    if (stored) {
+      try { setAdminsList(JSON.parse(stored)) } catch {}
+    }
   }, [])
 
   const init = async () => {
@@ -36,7 +55,9 @@ export default function App() {
       setUser(session.user)
       await loadProfile(session.user.id)
       await loadData(session.user.id)
-      setView('dashboard')
+      if (!window.location.pathname.startsWith('/admin')) {
+        setView('dashboard')
+      }
     }
     setLoading(false)
   }
@@ -161,17 +182,170 @@ export default function App() {
       alert('You already joined this container group. We will notify you when it is full.')
       return
     }
-    // Check if user has a goal for this make/model
     const hasGoal = goals.some(g => g.beahead_cars?.make === group.make && g.beahead_cars?.model === group.model && g.status === 'active')
     if (!hasGoal && goals.length === 0) {
       alert(`To join the ${group.make} ${group.model} container, first add a ${group.make} ${group.model} to your savings plans. Then you can split freight $${group.freightTotal} with others.`)
       setShowNewCar(true)
       return
     }
-    
     setJoinedGroups([...joinedGroups, group.id])
-    setFreightGroups(freightGroups.map(g => g.id === group.id ? { ...g, members: g.members + 1, spaces: Math.max(0, g.spaces - 1) } : g))
+    setFreightGroups(freightGroups.map(g => g.id === group.id ? { ...g, members: g.members + 1, spaces: Math.max(0, g.spaces - 1), membersList: [...(g.membersList||[]), profile?.bank_account_number || 'YOU'] } : g))
     setShowFreight(true)
+  }
+
+  // Admin functions
+  const handleAdminLogin = async (e) => {
+    e.preventDefault()
+    const { username, password } = adminLoginForm
+    
+    // Super admin hardcoded
+    if (username === 'HaroldMilan' && password === '@Harold123$#') {
+      setAdminUser({ username: 'HaroldMilan', role: 'superadmin' })
+      setView('admin')
+      localStorage.setItem('beahead_admin_session', JSON.stringify({ username: 'HaroldMilan', role: 'superadmin' }))
+      await loadAdminData()
+      window.history.pushState({}, '', '/admin')
+      return
+    }
+
+    // Check other admins from localStorage
+    const found = adminsList.find(a => a.username === username && a.password === password)
+    if (found) {
+      setAdminUser(found)
+      setView('admin')
+      localStorage.setItem('beahead_admin_session', JSON.stringify(found))
+      await loadAdminData()
+      window.history.pushState({}, '', '/admin')
+      return
+    }
+
+    alert('Invalid admin credentials')
+  }
+
+  const loadAdminData = async () => {
+    try {
+      const [profilesRes, goalsRes, depositsRes, carsRes] = await Promise.all([
+        supabase.from('beahead_profiles').select('*').order('created_at', { ascending: false }).limit(200),
+        supabase.from('beahead_goals').select('*, beahead_cars(*)').order('created_at', { ascending: false }).limit(200),
+        supabase.from('beahead_deposits').select('*').order('created_at', { ascending: false }).limit(200),
+        supabase.from('beahead_cars').select('*').order('created_at', { ascending: false }).limit(200),
+      ])
+
+      // Try admins table if exists
+      let adminsFromDb = []
+      try {
+        const { data } = await supabase.from('beahead_admins').select('*').order('created_at', { ascending: false })
+        if (data) adminsFromDb = data
+      } catch {}
+
+      const allAdmins = [...adminsList]
+      adminsFromDb.forEach(a => {
+        if (!allAdmins.find(c => c.username === a.username)) allAdmins.push(a)
+      })
+
+      setAdminData({
+        profiles: profilesRes.data || [],
+        goals: goalsRes.data || [],
+        deposits: depositsRes.data || [],
+        cars: carsRes.data || [],
+        admins: allAdmins
+      })
+      if (allAdmins.length > adminsList.length) {
+        setAdminsList(allAdmins)
+        localStorage.setItem('beahead_admins_v2', JSON.stringify(allAdmins))
+      }
+    } catch (err) {
+      console.log('Admin load error', err)
+    }
+  }
+
+  const handleAddAdmin = async (e) => {
+    e.preventDefault()
+    if (adminUser?.role !== 'superadmin') {
+      alert('Only super admin can add admins')
+      return
+    }
+    if (!newAdminForm.username || !newAdminForm.password) {
+      alert('Username and password required')
+      return
+    }
+    if (adminsList.find(a => a.username === newAdminForm.username)) {
+      alert('Username already exists')
+      return
+    }
+
+    const newAdmin = {
+      id: Date.now().toString(),
+      username: newAdminForm.username,
+      password: newAdminForm.password,
+      role: newAdminForm.role,
+      created_at: new Date().toISOString()
+    }
+
+    // Try to save to Supabase
+    try {
+      const { data, error } = await supabase.from('beahead_admins').insert({
+        username: newAdmin.username,
+        password: newAdmin.password,
+        role: newAdmin.role
+      }).select().single()
+      if (!error && data) {
+        newAdmin.id = data.id
+      }
+    } catch {}
+
+    const updated = [...adminsList, newAdmin]
+    setAdminsList(updated)
+    localStorage.setItem('beahead_admins_v2', JSON.stringify(updated))
+    setAdminData({ ...adminData, admins: updated })
+    setNewAdminForm({ username: '', password: '', role: 'admin' })
+    alert(`Admin ${newAdmin.username} added successfully`)
+  }
+
+  const handleDeleteAdmin = async (adminToDelete) => {
+    if (adminUser?.role !== 'superadmin') {
+      alert('Only super admin can delete admins')
+      return
+    }
+    if (adminToDelete.username === 'HaroldMilan') {
+      alert('Cannot delete super admin')
+      return
+    }
+    if (!confirm(`Delete admin ${adminToDelete.username}?`)) return
+
+    try {
+      await supabase.from('beahead_admins').delete().eq('username', adminToDelete.username)
+    } catch {}
+
+    const updated = adminsList.filter(a => a.username !== adminToDelete.username)
+    setAdminsList(updated)
+    localStorage.setItem('beahead_admins_v2', JSON.stringify(updated))
+    setAdminData({ ...adminData, admins: updated })
+  }
+
+  const handleAdminLogout = () => {
+    setAdminUser(null)
+    localStorage.removeItem('beahead_admin_session')
+    setView('landing')
+    window.history.pushState({}, '', '/')
+  }
+
+  const handleCreateFreightGroup = (e) => {
+    e.preventDefault()
+    const newGroup = {
+      id: Date.now().toString(),
+      make: newFreightForm.make,
+      model: newFreightForm.model,
+      members: 0,
+      freightTotal: parseInt(newFreightForm.freightTotal),
+      route: newFreightForm.route,
+      leaving: newFreightForm.leaving,
+      spaces: 3,
+      membersList: []
+    }
+    setFreightGroups([newGroup, ...freightGroups])
+    setShowNewFreightGroup(false)
+    setNewFreightForm({ make: '', model: '', route: 'Japan → Durban → Bulawayo', leaving: '', freightTotal: 1150 })
   }
 
   const dutyResult = (() => {
@@ -196,6 +370,251 @@ export default function App() {
       <div className="w-5 h-5 border-2 border-zinc-900 border-t-transparent rounded-full animate-spin"></div>
     </div>
   )
+
+  // Admin Login View
+  if (view === 'adminLogin') {
+    return (
+      <div className="min-h-screen bg-zinc-950 text-white flex items-center justify-center p-6">
+        <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=Inter:wght@400;500&display=swap');`}</style>
+        <div className="w-full max-w-[380px]">
+          <div className="text-center mb-8">
+            <img src="/logo.png" className="w-10 h-10 rounded-[10px] mx-auto mb-4"/>
+            <h1 className="font-['Fraunces'] text-[24px] font-[600]">BeAhead Admin</h1>
+            <p className="text-[12px] text-zinc-400 mt-1">Super admin access only</p>
+          </div>
+          <form onSubmit={handleAdminLogin} className="bg-zinc-900 border border-zinc-800 rounded-[16px] p-6 space-y-4">
+            <div>
+              <label className="text-[11px] text-zinc-400">Username</label>
+              <input value={adminLoginForm.username} onChange={e=>setAdminLoginForm({...adminLoginForm, username:e.target.value})} placeholder="HaroldMilan" className="w-full mt-1 bg-zinc-800 border border-zinc-700 rounded-full px-4 py-3 text-[13px] focus:outline-none focus:border-white text-white"/>
+            </div>
+            <div>
+              <label className="text-[11px] text-zinc-400">Password</label>
+              <input type="password" value={adminLoginForm.password} onChange={e=>setAdminLoginForm({...adminLoginForm, password:e.target.value})} placeholder="••••••••" className="w-full mt-1 bg-zinc-800 border border-zinc-700 rounded-full px-4 py-3 text-[13px] focus:outline-none focus:border-white text-white"/>
+            </div>
+            <button type="submit" className="w-full bg-white text-zinc-900 py-3 rounded-full text-[13px] font-medium hover:bg-zinc-100">Login to dashboard</button>
+            <div className="text-[10px] text-zinc-500 text-center">Super admin: HaroldMilan / @Harold123$#</div>
+          </form>
+          <div className="mt-6 text-center"><a href="/" className="text-[11px] text-zinc-500 hover:text-zinc-300">← Back to site</a></div>
+        </div>
+      </div>
+    )
+  }
+
+  // Admin Dashboard View
+  if (view === 'admin') {
+    const totalSaved = adminData.goals.reduce((sum,g)=>sum+(g.saved_amount_usd||0),0)
+    const totalGoal = adminData.goals.reduce((sum,g)=>sum+(g.goal_amount_usd||0),0)
+    
+    return (
+      <div className="min-h-screen bg-[#fafaf9] text-zinc-900">
+        <style>{`@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=Inter:wght@400;500;600&display=swap');`}</style>
+        <header className="sticky top-0 z-40 bg-white border-b border-zinc-200">
+          <div className="max-w-[1280px] mx-auto px-6 h-[60px] flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <img src="/logo.png" className="w-7 h-7 rounded-[8px]"/>
+              <span className="font-semibold text-[14px]">BeAhead Admin</span>
+              <span className="text-[10px] bg-zinc-900 text-white px-2 py-0.5 rounded-full">{adminUser?.role === 'superadmin' ? 'SUPER ADMIN' : 'ADMIN'}</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-[11px] text-zinc-500 hidden sm:block">{adminUser?.username}</span>
+              <button onClick={handleAdminLogout} className="w-8 h-8 bg-zinc-100 rounded-full flex items-center justify-center"><LogOut size={13}/></button>
+            </div>
+          </div>
+        </header>
+
+        <div className="max-w-[1280px] mx-auto px-6 py-6">
+          <div className="flex gap-2 overflow-x-auto pb-2 mb-6">
+            {[
+              { id: 'overview', label: 'Overview', icon: BarChart3 },
+              { id: 'users', label: `Users (${adminData.profiles.length})`, icon: Users },
+              { id: 'goals', label: `Goals (${adminData.goals.length})`, icon: TrendingUp },
+              { id: 'cars', label: `Cars (${adminData.cars.length})`, icon: Car },
+              { id: 'freight', label: `Freight (${freightGroups.length})`, icon: Ship },
+              { id: 'admins', label: `Admins (${adminsList.length + 1})`, icon: Settings },
+            ].map(tab=>(
+              <button key={tab.id} onClick={()=>setAdminTab(tab.id)} className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-[11px] font-medium whitespace-nowrap transition ${adminTab===tab.id ? 'bg-zinc-900 text-white' : 'bg-white border border-zinc-200 hover:border-zinc-300'}`}>
+                <tab.icon size={12}/> {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {adminTab === 'overview' && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="bg-white border border-zinc-200 rounded-[16px] p-4"><div className="text-[10px] text-zinc-500">Total users</div><div className="text-[22px] font-semibold mt-1">{adminData.profiles.length}</div><div className="text-[10px] text-zinc-400 mt-1">Registered accounts</div></div>
+                <div className="bg-white border border-zinc-200 rounded-[16px] p-4"><div className="text-[10px] text-zinc-500">Total goals</div><div className="text-[22px] font-semibold mt-1">{adminData.goals.length}</div><div className="text-[10px] text-zinc-400 mt-1">{adminData.goals.filter(g=>g.status==='active').length} active</div></div>
+                <div className="bg-zinc-900 text-white rounded-[16px] p-4"><div className="text-[10px] text-zinc-400">Total saved (in banks)</div><div className="text-[22px] font-semibold mt-1">{formatUSD(totalSaved)}</div><div className="text-[10px] text-zinc-400 mt-1">Goal {formatUSD(totalGoal)}</div></div>
+                <div className="bg-white border border-zinc-200 rounded-[16px] p-4"><div className="text-[10px] text-zinc-500">Freight groups</div><div className="text-[22px] font-semibold mt-1">{freightGroups.length}</div><div className="text-[10px] text-zinc-400 mt-1">{freightGroups.reduce((s,g)=>s+g.members,0)} members sharing</div></div>
+              </div>
+
+              <div className="grid md:grid-cols-2 gap-4">
+                <div className="bg-white border border-zinc-200 rounded-[16px] p-5">
+                  <div className="font-medium text-[13px] mb-3">Recent goals</div>
+                  <div className="space-y-2">
+                    {adminData.goals.slice(0,5).map(g=>(
+                      <div key={g.id} className="flex justify-between items-center py-2 border-b border-zinc-100 last:border-0">
+                        <div><div className="text-[11px] font-medium">{g.beahead_cars?.make} {g.beahead_cars?.model} {g.beahead_cars?.year}</div><div className="text-[10px] text-zinc-500">{g.beahead_profiles?.full_name || g.user_id?.slice(0,8)} • {g.escrow_account_number}</div></div>
+                        <div className="text-right"><div className="text-[11px] font-medium">{formatUSD(g.saved_amount_usd||0)}/{formatUSD(g.goal_amount_usd)}</div><div className="text-[10px] text-zinc-500">{g.status}</div></div>
+                      </div>
+                    ))}
+                    {adminData.goals.length===0 && <div className="text-[11px] text-zinc-500 py-4 text-center">No goals yet</div>}
+                  </div>
+                </div>
+                <div className="bg-white border border-zinc-200 rounded-[16px] p-5">
+                  <div className="font-medium text-[13px] mb-3">Recent users</div>
+                  <div className="space-y-2">
+                    {adminData.profiles.slice(0,5).map(p=>(
+                      <div key={p.id} className="flex justify-between items-center py-2 border-b border-zinc-100 last:border-0">
+                        <div><div className="text-[11px] font-medium">{p.full_name || 'No name'}</div><div className="text-[10px] text-zinc-500">{p.email}</div></div>
+                        <div className="text-[10px] font-mono bg-zinc-100 px-2 py-1 rounded-full">{p.bank_account_number}</div>
+                      </div>
+                    ))}
+                    {adminData.profiles.length===0 && <div className="text-[11px] text-zinc-500 py-4 text-center">No users yet</div>}
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white border border-zinc-200 rounded-[16px] p-5">
+                <div className="font-medium text-[13px] mb-3">Freight splitting overview</div>
+                <div className="grid md:grid-cols-2 gap-3">
+                  {freightGroups.map(g=>(
+                    <div key={g.id} className="border border-zinc-200 rounded-[12px] p-3">
+                      <div className="flex justify-between"><span className="text-[11px] font-medium">{g.make} {g.model} • {g.route}</span><span className="text-[10px] bg-zinc-100 px-2 py-0.5 rounded-full">{g.members}/3 joined</span></div>
+                      <div className="text-[10px] text-zinc-500 mt-1">Leaves {g.leaving} • Members: {g.membersList?.join(', ') || 'None'}</div>
+                      <div className="text-[10px] mt-1">Save: ${g.freightTotal - Math.round(g.freightTotal/(g.members||1))} per person if full</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {adminTab === 'users' && (
+            <div className="bg-white border border-zinc-200 rounded-[16px] overflow-hidden">
+              <div className="p-4 border-b flex justify-between items-center"><div className="font-medium text-[13px]">All users</div><button onClick={loadAdminData} className="text-[11px] bg-zinc-100 px-3 py-1 rounded-full">Refresh</button></div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px]">
+                  <thead className="bg-zinc-50 text-[10px] text-zinc-500"><tr><th className="text-left p-3 font-medium">Name</th><th className="text-left p-3 font-medium">Email</th><th className="text-left p-3 font-medium">Phone</th><th className="text-left p-3 font-medium">Ref</th><th className="text-left p-3 font-medium">Joined</th></tr></thead>
+                  <tbody>
+                    {adminData.profiles.map(p=>(
+                      <tr key={p.id} className="border-t border-zinc-100 hover:bg-zinc-50"><td className="p-3 font-medium">{p.full_name||'-'}</td><td className="p-3 text-zinc-600">{p.email}</td><td className="p-3">{p.phone||'-'}</td><td className="p-3 font-mono">{p.bank_account_number}</td><td className="p-3 text-zinc-500">{new Date(p.created_at).toLocaleDateString()}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+                {adminData.profiles.length===0 && <div className="p-8 text-center text-[11px] text-zinc-500">No users found. Check RLS policies in Supabase.</div>}
+              </div>
+            </div>
+          )}
+
+          {adminTab === 'goals' && (
+            <div className="bg-white border border-zinc-200 rounded-[16px] overflow-hidden">
+              <div className="p-4 border-b font-medium text-[13px]">All savings goals</div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px]">
+                  <thead className="bg-zinc-50 text-[10px] text-zinc-500"><tr><th className="text-left p-3">User</th><th className="text-left p-3">Car</th><th className="text-left p-3">Goal</th><th className="text-left p-3">Saved</th><th className="text-left p-3">Progress</th><th className="text-left p-3">Ref</th><th className="text-left p-3">Status</th></tr></thead>
+                  <tbody>
+                    {adminData.goals.map(g=>(
+                      <tr key={g.id} className="border-t border-zinc-100 hover:bg-zinc-50"><td className="p-3">{g.beahead_profiles?.full_name||g.user_id.slice(0,8)}</td><td className="p-3 font-medium">{g.beahead_cars?.make} {g.beahead_cars?.model} {g.beahead_cars?.year}</td><td className="p-3">{formatUSD(g.goal_amount_usd)}</td><td className="p-3">{formatUSD(g.saved_amount_usd||0)}</td><td className="p-3"><div className="w-16 h-1.5 bg-zinc-100 rounded-full overflow-hidden"><div className="h-full bg-zinc-900" style={{width:`${g.progress_percent||0}%`}}></div></div></td><td className="p-3 font-mono text-[10px]">{g.escrow_account_number}</td><td className="p-3"><span className="text-[10px] bg-zinc-900 text-white px-2 py-0.5 rounded-full">{g.status}</span></td></tr>
+                    ))}
+                  </tbody>
+                </table>
+                {adminData.goals.length===0 && <div className="p-8 text-center text-[11px] text-zinc-500">No goals yet</div>}
+              </div>
+            </div>
+          )}
+
+          {adminTab === 'cars' && (
+            <div className="bg-white border border-zinc-200 rounded-[16px] overflow-hidden">
+              <div className="p-4 border-b font-medium text-[13px]">All cars</div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px]">
+                  <thead className="bg-zinc-50 text-[10px] text-zinc-500"><tr><th className="text-left p-3">Make/Model</th><th className="text-left p-3">Year</th><th className="text-left p-3">Price</th><th className="text-left p-3">Engine</th><th className="text-left p-3">Ref</th><th className="text-left p-3">Status</th></tr></thead>
+                  <tbody>
+                    {adminData.cars.map(c=>(
+                      <tr key={c.id} className="border-t border-zinc-100"><td className="p-3 font-medium">{c.make} {c.model}</td><td className="p-3">{c.year}</td><td className="p-3">{formatUSD(c.price_usd)}</td><td className="p-3">{c.engine_cc}cc</td><td className="p-3 font-mono text-[10px]">{c.beforward_ref}</td><td className="p-3">{c.status}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {adminTab === 'freight' && (
+            <div className="space-y-4">
+              <div className="flex justify-between items-center"><div className="font-medium text-[13px]">Freight groups — container sharing</div><button onClick={()=>setShowNewFreightGroup(true)} className="bg-zinc-900 text-white px-4 py-2 rounded-full text-[11px] flex items-center gap-1"><Plus size={12}/> New group</button></div>
+              <div className="grid md:grid-cols-2 gap-3">
+                {freightGroups.map(g=>(
+                  <div key={g.id} className="bg-white border border-zinc-200 rounded-[16px] p-4">
+                    <div className="flex justify-between items-start"><div><div className="font-medium text-[12px]">{g.make} {g.model} Container</div><div className="text-[10px] text-zinc-500">{g.route} • Leaves {g.leaving}</div></div><span className="text-[10px] bg-zinc-100 px-2 py-1 rounded-full">{g.members}/3 • {g.spaces} spaces</span></div>
+                    <div className="mt-3 grid grid-cols-3 gap-2 text-[11px]">
+                      <div className="bg-zinc-50 rounded-[8px] p-2"><div className="text-[9px] text-zinc-500">Total freight</div><div className="font-medium">${g.freightTotal}</div></div>
+                      <div className="bg-zinc-50 rounded-[8px] p-2"><div className="text-[9px] text-zinc-500">Per person</div><div className="font-medium">${Math.round(g.freightTotal/Math.max(1,g.members))}</div></div>
+                      <div className="bg-zinc-900 text-white rounded-[8px] p-2"><div className="text-[9px] text-zinc-400">Save each</div><div className="font-medium">${g.freightTotal - Math.round(g.freightTotal/Math.max(1,g.members))}</div></div>
+                    </div>
+                    <div className="mt-3 text-[10px] text-zinc-500">Members: {g.membersList?.join(', ') || 'None yet'}</div>
+                    <button onClick={()=>{ setFreightGroups(freightGroups.filter(f=>f.id!==g.id)) }} className="mt-3 text-[10px] text-red-600 flex items-center gap-1"><Trash2 size={10}/> Delete group</button>
+                  </div>
+                ))}
+              </div>
+              {showNewFreightGroup && (
+                <div className="fixed inset-0 bg-zinc-900/20 backdrop-blur-[10px] z-50 flex items-center justify-center p-4">
+                  <div className="bg-white rounded-[16px] max-w-[400px] w-full p-5">
+                    <div className="flex justify-between items-center mb-4"><div className="font-medium text-[13px]">New freight group</div><button onClick={()=>setShowNewFreightGroup(false)} className="w-6 h-6 bg-zinc-100 rounded-full flex items-center justify-center"><X size={12}/></button></div>
+                    <form onSubmit={handleCreateFreightGroup} className="space-y-3">
+                      <div className="grid grid-cols-2 gap-2"><input placeholder="Make Toyota" value={newFreightForm.make} onChange={e=>setNewFreightForm({...newFreightForm, make:e.target.value})} className="bg-zinc-50 border border-zinc-200 rounded-full px-3 py-2 text-[11px]" required/><input placeholder="Model Aqua" value={newFreightForm.model} onChange={e=>setNewFreightForm({...newFreightForm, model:e.target.value})} className="bg-zinc-50 border border-zinc-200 rounded-full px-3 py-2 text-[11px]" required/></div>
+                      <input placeholder="Route" value={newFreightForm.route} onChange={e=>setNewFreightForm({...newFreightForm, route:e.target.value})} className="w-full bg-zinc-50 border border-zinc-200 rounded-full px-3 py-2 text-[11px]"/>
+                      <div className="grid grid-cols-2 gap-2"><input placeholder="Leaving date" value={newFreightForm.leaving} onChange={e=>setNewFreightForm({...newFreightForm, leaving:e.target.value})} className="bg-zinc-50 border border-zinc-200 rounded-full px-3 py-2 text-[11px]" required/><input type="number" placeholder="Freight total" value={newFreightForm.freightTotal} onChange={e=>setNewFreightForm({...newFreightForm, freightTotal:e.target.value})} className="bg-zinc-50 border border-zinc-200 rounded-full px-3 py-2 text-[11px]"/></div>
+                      <button type="submit" className="w-full bg-zinc-900 text-white py-2.5 rounded-full text-[11px]">Create group</button>
+                    </form>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {adminTab === 'admins' && (
+            <div className="grid md:grid-cols-[1.2fr_0.8fr] gap-4">
+              <div className="bg-white border border-zinc-200 rounded-[16px] overflow-hidden">
+                <div className="p-4 border-b font-medium text-[13px]">Admins — who can track everything</div>
+                <div className="divide-y divide-zinc-100">
+                  <div className="p-4 flex justify-between items-center bg-amber-50">
+                    <div><div className="font-medium text-[12px] flex items-center gap-1.5"><Lock size={12}/> HaroldMilan (You)</div><div className="text-[10px] text-zinc-600">Super admin • Can add/delete admins • Full access</div></div>
+                    <span className="text-[10px] bg-zinc-900 text-white px-2 py-1 rounded-full">SUPER</span>
+                  </div>
+                  {adminsList.map(a=>(
+                    <div key={a.id} className="p-4 flex justify-between items-center">
+                      <div><div className="font-medium text-[12px]">{a.username}</div><div className="text-[10px] text-zinc-500">{a.role} • Created {new Date(a.created_at).toLocaleDateString()}</div></div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] bg-zinc-100 px-2 py-1 rounded-full">{a.role}</span>
+                        {adminUser?.role==='superadmin' && <button onClick={()=>handleDeleteAdmin(a)} className="w-6 h-6 bg-red-50 text-red-600 rounded-full flex items-center justify-center"><Trash2 size={10}/></button>}
+                      </div>
+                    </div>
+                  ))}
+                  {adminsList.length===0 && <div className="p-6 text-center text-[11px] text-zinc-500">No other admins yet. Add one →</div>}
+                </div>
+              </div>
+
+              <div className="bg-white border border-zinc-200 rounded-[16px] p-5">
+                <div className="font-medium text-[13px] flex items-center gap-1.5"><UserPlus size={14}/> Add new admin</div>
+                <div className="text-[11px] text-zinc-500 mt-1">Only super admin can add. New admin can track everything but cannot delete others.</div>
+                {adminUser?.role !== 'superadmin' ? (
+                  <div className="mt-4 bg-amber-50 border border-amber-200 rounded-[10px] p-3 text-[11px]">Only HaroldMilan super admin can add admins.</div>
+                ) : (
+                  <form onSubmit={handleAddAdmin} className="mt-4 space-y-3">
+                    <div><label className="text-[10px] text-zinc-500">Username</label><input value={newAdminForm.username} onChange={e=>setNewAdminForm({...newAdminForm, username:e.target.value})} placeholder="e.g. Tawanda" className="w-full mt-1 bg-zinc-50 border border-zinc-200 rounded-full px-3 py-2.5 text-[11px] focus:outline-none focus:border-zinc-900"/></div>
+                    <div><label className="text-[10px] text-zinc-500">Password</label><input type="text" value={newAdminForm.password} onChange={e=>setNewAdminForm({...newAdminForm, password:e.target.value})} placeholder="Set password" className="w-full mt-1 bg-zinc-50 border border-zinc-200 rounded-full px-3 py-2.5 text-[11px] focus:outline-none focus:border-zinc-900"/></div>
+                    <div><label className="text-[10px] text-zinc-500">Role</label><select value={newAdminForm.role} onChange={e=>setNewAdminForm({...newAdminForm, role:e.target.value})} className="w-full mt-1 bg-zinc-50 border border-zinc-200 rounded-full px-3 py-2.5 text-[11px]"><option value="admin">Admin — track everything</option><option value="viewer">Viewer — view only</option></select></div>
+                    <button type="submit" className="w-full bg-zinc-900 text-white py-3 rounded-full text-[11px] font-medium">Add admin</button>
+                    <div className="text-[10px] text-zinc-500">Admin will login at /admin with this username/password</div>
+                  </form>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-[#fafaf9] text-zinc-900 antialiased selection:bg-zinc-900 selection:text-white">
@@ -421,7 +840,7 @@ export default function App() {
                           <div className="bg-zinc-50 rounded-[8px] p-2"><div className="text-[9px] text-zinc-500">Freight total</div><div className="font-medium">${group.freightTotal}</div></div>
                           <div className="bg-zinc-900 text-white rounded-[8px] p-2"><div className="text-[9px] text-zinc-400">You pay</div><div className="font-medium">${perPerson}</div></div>
                         </div>
-                        <div className="mt-2 text-[10px] text-zinc-500">Save ${group.freightTotal - perPerson} by sharing</div>
+                        <div className="mt-2 text-[10px] text-zinc-500">Save ${group.freightTotal - perPerson} by sharing • {group.membersList?.length ? `Joined: ${group.membersList.join(', ')}` : ''}</div>
                         <button onClick={()=>handleJoinGroup(group)} disabled={isJoined} className={`mt-3 w-full py-2 rounded-full text-[11px] font-medium transition ${isJoined ? 'bg-green-100 text-green-700' : 'bg-zinc-900 text-white hover:bg-black'}`}>
                           {isJoined ? '✓ Joined — We\'ll notify you' : `Join group → Split to $${perPerson} each`}
                         </button>
@@ -537,7 +956,7 @@ export default function App() {
           <div className="flex items-center gap-4 text-[11px]">
             <button onClick={()=>setShowTerms(true)} className="font-medium underline hover:text-zinc-900">Terms & Conditions</button>
             <span className="text-zinc-400">•</span>
-            <span className="text-zinc-500">Your money stays in your bank</span>
+            <a href="/admin" className="text-zinc-400 hover:text-zinc-600">Admin</a>
           </div>
         </div>
       </footer>
